@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.22", "1.23"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PREV=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -1 || echo "")
+          if [ -z "$PREV" ]; then
+            BODY=$(git log --pretty=format:"- %s" HEAD)
+          else
+            BODY=$(git log --pretty=format:"- %s" "${PREV}..${TAG}")
+          fi
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "## Install" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo '```bash' >> "$GITHUB_OUTPUT"
+          echo "go get github.com/TheColonyCC/colony-sdk-go@${TAG}" >> "$GITHUB_OUTPUT"
+          echo '```' >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "## Changes" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: false
