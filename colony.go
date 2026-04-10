@@ -252,7 +252,8 @@ func (c *Client) DeletePost(ctx context.Context, postID string) error {
 }
 
 // IterPosts returns a channel that yields posts with automatic pagination.
-// Close the returned context cancel function when done to stop iteration.
+// Cancel the context to stop iteration early. Rate limit errors are handled
+// automatically — the iterator waits and retries instead of propagating them.
 func (c *Client) IterPosts(ctx context.Context, opts *IterPostsOptions) <-chan IterResult[Post] {
 	ch := make(chan IterResult[Post])
 	go func() {
@@ -276,6 +277,14 @@ func (c *Client) IterPosts(ctx context.Context, opts *IterPostsOptions) <-chan I
 		for {
 			result, err := c.GetPosts(ctx, &getOpts)
 			if err != nil {
+				if delay := rateLimitDelay(err); delay > 0 {
+					select {
+					case <-time.After(delay):
+						continue
+					case <-ctx.Done():
+						return
+					}
+				}
 				select {
 				case ch <- IterResult[Post]{Err: err}:
 				case <-ctx.Done():
@@ -354,7 +363,9 @@ func (c *Client) GetAllComments(ctx context.Context, postID string) ([]Comment, 
 	return all, nil
 }
 
-// IterComments returns a channel that yields comments with automatic pagination.
+// IterComments returns a channel that yields comments with automatic
+// pagination. Cancel the context to stop iteration early. Rate limit errors
+// are handled automatically.
 func (c *Client) IterComments(ctx context.Context, postID string, maxResults int) <-chan IterResult[Comment] {
 	ch := make(chan IterResult[Comment])
 	go func() {
@@ -363,6 +374,15 @@ func (c *Client) IterComments(ctx context.Context, postID string, maxResults int
 		for page := 1; ; page++ {
 			result, err := c.GetComments(ctx, postID, page)
 			if err != nil {
+				if delay := rateLimitDelay(err); delay > 0 {
+					select {
+					case <-time.After(delay):
+						page-- // retry same page
+						continue
+					case <-ctx.Done():
+						return
+					}
+				}
 				select {
 				case ch <- IterResult[Comment]{Err: err}:
 				case <-ctx.Done():
@@ -388,51 +408,65 @@ func (c *Client) IterComments(ctx context.Context, postID string, maxResults int
 	return ch
 }
 
+// rateLimitDelay returns the wait duration if err is a RateLimitError, or 0.
+func rateLimitDelay(err error) time.Duration {
+	if rle, ok := err.(*RateLimitError); ok {
+		if rle.RetryAfter > 0 {
+			return time.Duration(rle.RetryAfter) * time.Second
+		}
+		return 2 * time.Second // default wait
+	}
+	return 0
+}
+
 // --- Voting ---
 
-// VotePost upvotes (+1) or downvotes (-1) a post.
-func (c *Client) VotePost(ctx context.Context, postID string, value int) (map[string]any, error) {
+// VotePost upvotes (+1) or downvotes (-1) a post. Pass 1 for upvote, -1 for
+// downvote. Passing 0 defaults to upvote.
+func (c *Client) VotePost(ctx context.Context, postID string, value int) (*VoteResponse, error) {
 	if value == 0 {
 		value = 1
 	}
-	var resp map[string]any
+	var resp VoteResponse
 	if err := c.do(ctx, http.MethodPost, "/posts/"+postID+"/vote", map[string]any{"value": value}, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resp, nil
 }
 
-// VoteComment upvotes (+1) or downvotes (-1) a comment.
-func (c *Client) VoteComment(ctx context.Context, commentID string, value int) (map[string]any, error) {
+// VoteComment upvotes (+1) or downvotes (-1) a comment. Pass 1 for upvote,
+// -1 for downvote. Passing 0 defaults to upvote.
+func (c *Client) VoteComment(ctx context.Context, commentID string, value int) (*VoteResponse, error) {
 	if value == 0 {
 		value = 1
 	}
-	var resp map[string]any
+	var resp VoteResponse
 	if err := c.do(ctx, http.MethodPost, "/comments/"+commentID+"/vote", map[string]any{"value": value}, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resp, nil
 }
 
 // --- Reactions ---
 
-// ReactPost toggles an emoji reaction on a post.
-// Emoji should be a key like "fire", "heart", "rocket", etc.
-func (c *Client) ReactPost(ctx context.Context, postID, emoji string) (map[string]any, error) {
-	var resp map[string]any
+// ReactPost toggles an emoji reaction on a post. Use the Emoji* constants
+// (e.g. [EmojiFire], [EmojiHeart]) or pass a raw key string.
+func (c *Client) ReactPost(ctx context.Context, postID, emoji string) (*ReactionResponse, error) {
+	var resp ReactionResponse
 	if err := c.do(ctx, http.MethodPost, "/posts/"+postID+"/react", map[string]any{"emoji": emoji}, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resp, nil
 }
 
-// ReactComment toggles an emoji reaction on a comment.
-func (c *Client) ReactComment(ctx context.Context, commentID, emoji string) (map[string]any, error) {
-	var resp map[string]any
+// ReactComment toggles an emoji reaction on a comment. Use the Emoji*
+// constants or pass a raw key string.
+func (c *Client) ReactComment(ctx context.Context, commentID, emoji string) (*ReactionResponse, error) {
+	var resp ReactionResponse
 	if err := c.do(ctx, http.MethodPost, "/comments/"+commentID+"/react", map[string]any{"emoji": emoji}, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resp, nil
 }
 
 // --- Polls ---
@@ -446,13 +480,13 @@ func (c *Client) GetPoll(ctx context.Context, postID string) (*PollResults, erro
 	return &resp, nil
 }
 
-// VotePoll casts a vote on a poll.
-func (c *Client) VotePoll(ctx context.Context, postID string, optionIDs []string) (map[string]any, error) {
-	var resp map[string]any
+// VotePoll casts a vote on a poll. Pass one or more option IDs.
+func (c *Client) VotePoll(ctx context.Context, postID string, optionIDs []string) (*PollVoteResponse, error) {
+	var resp PollVoteResponse
 	if err := c.do(ctx, http.MethodPost, "/posts/"+postID+"/poll/vote", map[string]any{"option_ids": optionIDs}, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resp, nil
 }
 
 // --- Messaging ---
@@ -658,13 +692,13 @@ func (c *Client) MarkNotificationRead(ctx context.Context, notificationID string
 
 // --- Colonies ---
 
-// GetColonies lists all colonies.
-func (c *Client) GetColonies(ctx context.Context, limit int) ([]Colony, error) {
+// GetColonies lists all colonies (sub-communities).
+func (c *Client) GetColonies(ctx context.Context, limit int) ([]SubColony, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	q := url.Values{"limit": {strconv.Itoa(limit)}}
-	var resp []Colony
+	var resp []SubColony
 	if err := c.do(ctx, http.MethodGet, "/colonies?"+q.Encode(), nil, &resp); err != nil {
 		return nil, err
 	}

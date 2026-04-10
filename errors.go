@@ -2,7 +2,9 @@ package colony
 
 import "fmt"
 
-// APIError is the base error returned by all Colony API failures.
+// APIError is the base error returned by all Colony API failures. Use
+// [errors.As] to match specific subtypes like [RateLimitError] or
+// [NotFoundError].
 type APIError struct {
 	// Status is the HTTP status code (0 for network errors).
 	Status int
@@ -23,32 +25,74 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("colony: HTTP %d: %s", e.Status, e.Message)
 }
 
+// Unwrap returns the underlying cause, enabling [errors.Is] and [errors.As].
 func (e *APIError) Unwrap() error { return e.Cause }
 
-// AuthError is returned on 401/403.
+// AuthError is returned on 401 Unauthorized or 403 Forbidden. Check your API
+// key or call [Client.RefreshToken].
 type AuthError struct{ APIError }
 
-// NotFoundError is returned on 404.
+func (e *AuthError) Error() string {
+	return "colony: auth error: " + e.Message
+}
+
+// NotFoundError is returned on 404 Not Found. The requested resource does not
+// exist.
 type NotFoundError struct{ APIError }
 
-// ConflictError is returned on 409 (already voted, username taken, etc.).
+func (e *NotFoundError) Error() string {
+	return "colony: not found: " + e.Message
+}
+
+// ConflictError is returned on 409 Conflict — the operation conflicts with
+// existing state (already voted, username taken, already following, etc.).
 type ConflictError struct{ APIError }
 
-// ValidationError is returned on 400/422.
+func (e *ConflictError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("colony: conflict [%s]: %s", e.Code, e.Message)
+	}
+	return "colony: conflict: " + e.Message
+}
+
+// ValidationError is returned on 400 Bad Request or 422 Unprocessable Entity.
+// Check the request parameters.
 type ValidationError struct{ APIError }
 
-// RateLimitError is returned on 429.
+func (e *ValidationError) Error() string {
+	return "colony: validation error: " + e.Message
+}
+
+// RateLimitError is returned on 429 Too Many Requests. RetryAfter indicates
+// how many seconds to wait before retrying (0 if the server did not specify).
 type RateLimitError struct {
 	APIError
 	// RetryAfter is the number of seconds to wait before retrying, or 0 if unknown.
 	RetryAfter int
 }
 
-// ServerError is returned on 5xx.
+func (e *RateLimitError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("colony: rate limited (retry after %ds): %s", e.RetryAfter, e.Message)
+	}
+	return "colony: rate limited: " + e.Message
+}
+
+// ServerError is returned on 5xx responses. These are usually transient and
+// the client will automatically retry based on [RetryConfig].
 type ServerError struct{ APIError }
 
-// NetworkError is returned when the request never reached the server.
+func (e *ServerError) Error() string {
+	return fmt.Sprintf("colony: server error (HTTP %d): %s", e.Status, e.Message)
+}
+
+// NetworkError is returned when the request never reached the server (DNS
+// failure, connection refused, timeout, etc.). Status is always 0.
 type NetworkError struct{ APIError }
+
+func (e *NetworkError) Error() string {
+	return "colony: network error: " + e.Message
+}
 
 // newAPIError builds the appropriate typed error from an HTTP status.
 func newAPIError(status int, code, message string, resp map[string]any, cause error) error {

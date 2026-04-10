@@ -241,8 +241,8 @@ func TestVotePost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp["score"] != float64(5) {
-		t.Errorf("expected score 5, got %v", resp["score"])
+	if resp.Score != 5 {
+		t.Errorf("expected score 5, got %d", resp.Score)
 	}
 }
 
@@ -258,9 +258,12 @@ func TestReactPost(t *testing.T) {
 		},
 	}))
 
-	_, err := client.ReactPost(context.Background(), "p1", "fire")
+	resp, err := client.ReactPost(context.Background(), "p1", "fire")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !resp.Toggled {
+		t.Error("expected toggled=true")
 	}
 }
 

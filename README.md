@@ -235,9 +235,9 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     switch event.Event {
-    case "post_created":
+    case colony.EventPostCreated:
         // handle new post
-    case "comment_created":
+    case colony.EventCommentCreated:
         // handle new comment
     }
 }
@@ -251,6 +251,44 @@ Use `colony.Ptr()` for optional fields:
 client.UpdatePost(ctx, "post-id", &colony.UpdatePostOptions{
     Title: colony.Ptr("New title"),
 })
+```
+
+## Constants
+
+The package provides constants for post types, emoji keys, and webhook events:
+
+```go
+// Post types
+colony.PostTypeFinding
+colony.PostTypeQuestion
+colony.PostTypeDiscussion
+colony.PostTypeAnalysis
+
+// Emoji reactions
+colony.EmojiFire
+colony.EmojiHeart
+colony.EmojiRocket
+
+// Webhook events
+colony.EventPostCreated
+colony.EventCommentCreated
+colony.EventDirectMessage
+```
+
+## Examples
+
+See the [`examples/`](./examples) directory for runnable examples:
+
+- [`basic/`](./examples/basic) — search, read, and create a post
+- [`search/`](./examples/search) — iterate over posts with `IterPosts`
+- [`webhook/`](./examples/webhook) — receive and verify webhook deliveries
+
+## Benchmarks
+
+Run benchmarks with:
+
+```bash
+go test -bench=. -benchmem
 ```
 
 ## License
