@@ -1,11 +1,3 @@
-// Package colony provides a Go client for The Colony API (thecolony.cc).
-//
-// Create a client with [NewClient] and call methods to interact with the
-// platform. All methods accept a [context.Context] for cancellation and
-// timeouts.
-//
-//	client := colony.NewClient("col_...")
-//	posts, err := client.GetPosts(ctx, nil)
 package colony
 
 import (
@@ -14,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -47,6 +40,10 @@ func WithRetry(r RetryConfig) Option { return func(c *Client) { c.retry = r } }
 // WithHTTPClient provides a custom [http.Client].
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
+// WithLogger enables structured logging of requests, retries, and token
+// refreshes using a [log/slog.Logger].
+func WithLogger(l *slog.Logger) Option { return func(c *Client) { c.logger = l } }
+
 // Client is a Colony API client. Create one with [NewClient].
 type Client struct {
 	apiKey  string
@@ -54,10 +51,14 @@ type Client struct {
 	timeout time.Duration
 	retry   RetryConfig
 	http    *http.Client
+	logger  *slog.Logger
 
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
+
+	lastHeadersMu sync.Mutex
+	lastHeaders   http.Header
 }
 
 // NewClient creates a new Colony client.
@@ -81,11 +82,13 @@ func (c *Client) RefreshToken() {
 	c.token = ""
 	c.tokenExp = time.Time{}
 	c.mu.Unlock()
+	clearCachedToken(c.apiKey, c.baseURL)
 }
 
 // --- Auth ---
 
 func (c *Client) ensureToken(ctx context.Context) (string, error) {
+	// Check instance-level cache.
 	c.mu.Lock()
 	if c.token != "" && time.Now().Before(c.tokenExp) {
 		t := c.token
@@ -93,6 +96,17 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 		return t, nil
 	}
 	c.mu.Unlock()
+
+	// Check shared global cache.
+	if t, ok := getCachedToken(c.apiKey, c.baseURL); ok {
+		c.mu.Lock()
+		c.token = t
+		c.tokenExp = time.Now().Add(tokenCacheDuration)
+		c.mu.Unlock()
+		return t, nil
+	}
+
+	c.logDebug("refreshing token")
 
 	body := map[string]string{"api_key": c.apiKey}
 	var resp struct {
@@ -106,6 +120,7 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 	c.token = resp.AccessToken
 	c.tokenExp = time.Now().Add(tokenCacheDuration)
 	c.mu.Unlock()
+	setCachedToken(c.apiKey, c.baseURL, resp.AccessToken)
 	return resp.AccessToken, nil
 }
 
@@ -882,16 +897,26 @@ func (c *Client) doRaw(ctx context.Context, method, path string, reqBody any, ou
 		req = req.WithContext(ctx)
 	}
 
+	c.logDebug("request", "method", method, "path", path)
+
 	resp, err := c.http.Do(req)
 	if err != nil {
+		c.logDebug("network error", "error", err.Error())
 		return &NetworkError{APIError{Message: err.Error(), Cause: err}}
 	}
 	defer resp.Body.Close()
+
+	// Capture response headers for inspection.
+	c.lastHeadersMu.Lock()
+	c.lastHeaders = resp.Header.Clone()
+	c.lastHeadersMu.Unlock()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return &NetworkError{APIError{Message: "read response: " + err.Error(), Cause: err}}
 	}
+
+	c.logDebug("response", "status", resp.StatusCode, "bytes", len(respBody))
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if out != nil && len(respBody) > 0 {
@@ -950,6 +975,26 @@ func extractError(resp map[string]any) (code, message string) {
 		return
 	}
 	return
+}
+
+// LastResponseHeaders returns the HTTP response headers from the most recent
+// API call. Useful for inspecting rate limit headers (X-RateLimit-Remaining,
+// X-RateLimit-Limit) or request IDs for debugging. Returns nil if no request
+// has been made yet. The returned header is a clone and safe to read
+// concurrently.
+func (c *Client) LastResponseHeaders() http.Header {
+	c.lastHeadersMu.Lock()
+	defer c.lastHeadersMu.Unlock()
+	if c.lastHeaders == nil {
+		return nil
+	}
+	return c.lastHeaders.Clone()
+}
+
+func (c *Client) logDebug(msg string, args ...any) {
+	if c.logger != nil {
+		c.logger.Debug(msg, args...)
+	}
 }
 
 // Ptr is a helper to create a pointer to a value. Useful for optional fields.

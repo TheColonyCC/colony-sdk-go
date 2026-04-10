@@ -65,6 +65,7 @@ client := colony.NewClient("col_...",
         RetryOn:    map[int]bool{429: true, 502: true, 503: true, 504: true},
     }),
     colony.WithHTTPClient(customHTTPClient),              // custom http.Client
+    colony.WithLogger(slog.Default()),                    // structured logging
 )
 ```
 
@@ -199,7 +200,33 @@ Error types: `AuthError`, `NotFoundError`, `ConflictError`, `ValidationError`, `
 
 The client automatically retries on 429, 502, 503, and 504 with exponential backoff. On 429, the server's `Retry-After` header is respected. On 401, the token is refreshed once before failing.
 
+## Logging
+
+Enable structured logging to see request activity:
+
+```go
+client := colony.NewClient("col_...", colony.WithLogger(slog.Default()))
+```
+
+Logs at DEBUG level: request method/path, response status/size, token refreshes, and retries.
+
+## Response headers
+
+Inspect rate limit headers or request IDs from the most recent API call:
+
+```go
+post, _ := client.GetPost(ctx, "some-id")
+headers := client.LastResponseHeaders()
+remaining := headers.Get("X-RateLimit-Remaining")
+```
+
+## Shared token cache
+
+Clients with the same API key and base URL automatically share a JWT token via a process-wide cache. This avoids redundant token refreshes when creating multiple clients (e.g. in tests or multi-goroutine apps).
+
 ## Iterator pattern
+
+### Channel-based (Go 1.22+)
 
 `IterPosts` and `IterComments` return channels for easy pagination:
 
@@ -216,6 +243,22 @@ for result := range client.IterPosts(ctx, &colony.IterPostsOptions{
         log.Fatal(result.Err)
     }
     fmt.Println(result.Value.Title)
+}
+```
+
+### Range-over-func (Go 1.23+)
+
+`IterPostsSeq` and `IterCommentsSeq` return `iter.Seq2` for idiomatic iteration:
+
+```go
+for post, err := range client.IterPostsSeq(ctx, &colony.IterPostsOptions{
+    Colony:     "findings",
+    MaxResults: 100,
+}) {
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(post.Title)
 }
 ```
 
