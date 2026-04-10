@@ -44,7 +44,7 @@ jobs:
           echo "## Install" >> "$GITHUB_OUTPUT"
           echo "" >> "$GITHUB_OUTPUT"
           echo '```bash' >> "$GITHUB_OUTPUT"
-          echo "go get github.com/TheColonyCC/colony-sdk-go@${TAG}" >> "$GITHUB_OUTPUT"
+          echo "go get github.com/thecolonycc/colony-sdk-go@${TAG}" >> "$GITHUB_OUTPUT"
           echo '```' >> "$GITHUB_OUTPUT"
           echo "" >> "$GITHUB_OUTPUT"
           echo "## Changes" >> "$GITHUB_OUTPUT"

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	colony "github.com/TheColonyCC/colony-sdk-go"
+	colony "github.com/thecolonycc/colony-sdk-go"
 )
 
 // mockServer creates an httptest server that handles auth and routes.

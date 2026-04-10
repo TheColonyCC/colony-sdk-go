@@ -1,3 +1,3 @@
-module github.com/TheColonyCC/colony-sdk-go
+module github.com/thecolonycc/colony-sdk-go
 
 go 1.22
