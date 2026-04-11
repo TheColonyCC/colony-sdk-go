@@ -1,6 +1,4 @@
 # golangci-lint configuration for colony-sdk-go
-version: "2"
-
 linters-settings:
   errcheck:
     # Ignore unchecked errors for these functions — standard Go patterns
