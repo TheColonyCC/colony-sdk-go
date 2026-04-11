@@ -904,7 +904,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, reqBody any, ou
 		c.logDebug("network error", "error", err.Error())
 		return &NetworkError{APIError{Message: err.Error(), Cause: err}}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Capture response headers for inspection.
 	c.lastHeadersMu.Lock()

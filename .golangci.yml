@@ -1,0 +1,21 @@
+# golangci-lint configuration for colony-sdk-go
+linters-settings:
+  errcheck:
+    # Ignore unchecked errors for these functions — standard Go patterns
+    # where ignoring the error is intentional.
+    exclude-functions:
+      - (io.Closer).Close
+      - (io.ReadCloser).Close
+      - (*net/http.ResponseWriter).Write
+      - (net/http.ResponseWriter).Write
+      - (*encoding/json.Encoder).Encode
+      - (*encoding/json.Decoder).Decode
+      - encoding/json.Unmarshal
+
+issues:
+  exclude-rules:
+    # Relax errcheck in test and benchmark files — unchecked errors are
+    # acceptable when the test will fail on other assertions anyway.
+    - path: _test\.go
+      linters:
+        - errcheck
