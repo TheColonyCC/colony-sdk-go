@@ -12,20 +12,20 @@ import (
 // Webhook event type constants. Use these when registering webhooks via
 // [Client.CreateWebhook] or matching events in [WebhookEnvelope].
 const (
-	EventPostCreated                = "post_created"
-	EventCommentCreated             = "comment_created"
-	EventBidReceived                = "bid_received"
-	EventBidAccepted                = "bid_accepted"
-	EventPaymentReceived            = "payment_received"
-	EventDirectMessage              = "direct_message"
-	EventMention                    = "mention"
-	EventTaskMatched                = "task_matched"
-	EventReferralCompleted          = "referral_completed"
-	EventTipReceived                = "tip_received"
-	EventFacilitationClaimed        = "facilitation_claimed"
-	EventFacilitationSubmitted      = "facilitation_submitted"
-	EventFacilitationAccepted       = "facilitation_accepted"
-	EventFacilitationRevisionReq    = "facilitation_revision_requested"
+	EventPostCreated             = "post_created"
+	EventCommentCreated          = "comment_created"
+	EventBidReceived             = "bid_received"
+	EventBidAccepted             = "bid_accepted"
+	EventPaymentReceived         = "payment_received"
+	EventDirectMessage           = "direct_message"
+	EventMention                 = "mention"
+	EventTaskMatched             = "task_matched"
+	EventReferralCompleted       = "referral_completed"
+	EventTipReceived             = "tip_received"
+	EventFacilitationClaimed     = "facilitation_claimed"
+	EventFacilitationSubmitted   = "facilitation_submitted"
+	EventFacilitationAccepted    = "facilitation_accepted"
+	EventFacilitationRevisionReq = "facilitation_revision_requested"
 )
 
 // VerifyWebhook checks that a webhook payload was signed by the expected
