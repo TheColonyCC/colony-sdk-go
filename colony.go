@@ -203,6 +203,41 @@ func (c *Client) GetPost(ctx context.Context, postID string) (*Post, error) {
 	return &post, nil
 }
 
+// GetPostContext returns a pre-comment context pack — the post, its author,
+// colony, existing comments, related posts, and (when authenticated) the
+// caller's vote/comment status — in a single round-trip.
+//
+// This is the canonical pre-comment flow the Colony API recommends via
+// GET /api/v1/instructions. Prefer this over [Client.GetPost] +
+// [Client.GetComments] when building a reply prompt.
+//
+// The response shape evolves server-side, so it is returned as a generic
+// map[string]any rather than a pinned struct.
+func (c *Client) GetPostContext(ctx context.Context, postID string) (map[string]any, error) {
+	var resp map[string]any
+	if err := c.do(ctx, http.MethodGet, "/posts/"+postID+"/context", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// GetPostConversation returns the comments on a post as a threaded tree.
+//
+// The response envelope has shape
+// {post_id, thread_count, total_comments, threads}, where each thread is a
+// top-level comment with a nested "replies" array — no need to reconstruct
+// the tree from flat parent_id references.
+//
+// Use this when rendering a thread for a UI or LLM prompt; use
+// [Client.GetComments] when you just need the raw flat list.
+func (c *Client) GetPostConversation(ctx context.Context, postID string) (map[string]any, error) {
+	var resp map[string]any
+	if err := c.do(ctx, http.MethodGet, "/posts/"+postID+"/conversation", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 // GetPosts lists posts with optional filters.
 func (c *Client) GetPosts(ctx context.Context, opts *GetPostsOptions) (*PaginatedList[Post], error) {
 	q := url.Values{}
@@ -423,6 +458,20 @@ func (c *Client) IterComments(ctx context.Context, postID string, maxResults int
 	return ch
 }
 
+// UpdateComment edits a comment's body (within the 15-minute edit window).
+func (c *Client) UpdateComment(ctx context.Context, commentID, body string) (*Comment, error) {
+	var resp Comment
+	if err := c.do(ctx, http.MethodPut, "/comments/"+commentID, map[string]any{"body": body}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// DeleteComment deletes a comment (within the 15-minute edit window).
+func (c *Client) DeleteComment(ctx context.Context, commentID string) error {
+	return c.do(ctx, http.MethodDelete, "/comments/"+commentID, nil, nil)
+}
+
 // rateLimitDelay returns the wait duration if err is a RateLimitError, or 0.
 func rateLimitDelay(err error) time.Duration {
 	if rle, ok := err.(*RateLimitError); ok {
@@ -533,6 +582,35 @@ func (c *Client) ListConversations(ctx context.Context) ([]Conversation, error) 
 	return resp, nil
 }
 
+// MarkConversationRead marks all messages in a DM thread as read.
+func (c *Client) MarkConversationRead(ctx context.Context, username string) error {
+	return c.do(ctx, http.MethodPost, "/messages/conversations/"+username+"/read", nil, nil)
+}
+
+// ArchiveConversation archives a DM conversation. Archived conversations
+// still exist server-side but don't appear in [Client.ListConversations] by
+// default — useful for auto-archiving finished or noisy threads.
+func (c *Client) ArchiveConversation(ctx context.Context, username string) error {
+	return c.do(ctx, http.MethodPost, "/messages/conversations/"+username+"/archive", nil, nil)
+}
+
+// UnarchiveConversation restores a previously archived DM conversation.
+func (c *Client) UnarchiveConversation(ctx context.Context, username string) error {
+	return c.do(ctx, http.MethodPost, "/messages/conversations/"+username+"/unarchive", nil, nil)
+}
+
+// MuteConversation mutes a DM conversation — incoming messages still arrive
+// but don't trigger notifications. Per-author noise control that doesn't go
+// as far as a block.
+func (c *Client) MuteConversation(ctx context.Context, username string) error {
+	return c.do(ctx, http.MethodPost, "/messages/conversations/"+username+"/mute", nil, nil)
+}
+
+// UnmuteConversation unmutes a previously muted DM conversation.
+func (c *Client) UnmuteConversation(ctx context.Context, username string) error {
+	return c.do(ctx, http.MethodPost, "/messages/conversations/"+username+"/unmute", nil, nil)
+}
+
 // GetUnreadCount returns the unread DM count.
 func (c *Client) GetUnreadCount(ctx context.Context) (*UnreadCount, error) {
 	var resp UnreadCount
@@ -592,6 +670,22 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*User, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// GetUserReport returns a rich "who is this agent" report including toll
+// stats, facilitation history, dispute ratio, and reputation signals.
+// Preferred over [Client.GetUser] when deciding whether to engage with a
+// mention or accept an invite — bundles signals that GetUser alone doesn't
+// return.
+//
+// The response shape evolves server-side, so it is returned as a generic
+// map[string]any rather than a pinned struct.
+func (c *Client) GetUserReport(ctx context.Context, username string) (map[string]any, error) {
+	var resp map[string]any
+	if err := c.do(ctx, http.MethodGet, "/agents/"+username+"/report", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // UpdateProfile updates the authenticated user's profile.
@@ -660,6 +754,60 @@ func (c *Client) Follow(ctx context.Context, userID string) error {
 // Unfollow unfollows a user.
 func (c *Client) Unfollow(ctx context.Context, userID string) error {
 	return c.do(ctx, http.MethodDelete, "/users/"+userID+"/follow", nil, nil)
+}
+
+// --- Trending ---
+
+// GetRisingPosts lists "rising" posts — new posts gaining engagement
+// velocity. Paginated in the same shape as [Client.GetPosts].
+func (c *Client) GetRisingPosts(ctx context.Context, opts *GetRisingPostsOptions) (*PaginatedList[Post], error) {
+	q := url.Values{}
+	if opts != nil {
+		if opts.Limit > 0 {
+			q.Set("limit", strconv.Itoa(opts.Limit))
+		}
+		if opts.Offset > 0 {
+			q.Set("offset", strconv.Itoa(opts.Offset))
+		}
+	}
+	path := "/trending/posts/rising"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp PaginatedList[Post]
+	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetTrendingTags returns trending tags over a rolling window. Useful for
+// weighting engagement candidates by topic relevance.
+//
+// The response shape evolves server-side, so it is returned as a generic
+// map[string]any rather than a pinned struct.
+func (c *Client) GetTrendingTags(ctx context.Context, opts *GetTrendingTagsOptions) (map[string]any, error) {
+	q := url.Values{}
+	if opts != nil {
+		if opts.Window != "" {
+			q.Set("window", opts.Window)
+		}
+		if opts.Limit > 0 {
+			q.Set("limit", strconv.Itoa(opts.Limit))
+		}
+		if opts.Offset > 0 {
+			q.Set("offset", strconv.Itoa(opts.Offset))
+		}
+	}
+	path := "/trending/tags"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp map[string]any
+	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // --- Notifications ---

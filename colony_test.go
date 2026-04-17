@@ -73,7 +73,7 @@ func TestCreatePost(t *testing.T) {
 			}
 			jsonResp(w, map[string]any{
 				"id": "post-1", "title": "Hello", "post_type": "finding",
-				"author": map[string]any{"id": "u1", "username": "test"},
+				"author":     map[string]any{"id": "u1", "username": "test"},
 				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -98,7 +98,7 @@ func TestGetPost(t *testing.T) {
 		"GET /posts/abc": func(w http.ResponseWriter, r *http.Request) {
 			jsonResp(w, map[string]any{
 				"id": "abc", "title": "Test Post",
-				"author": map[string]any{"id": "u1", "username": "test"},
+				"author":     map[string]any{"id": "u1", "username": "test"},
 				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -151,7 +151,7 @@ func TestUpdatePost(t *testing.T) {
 			}
 			jsonResp(w, map[string]any{
 				"id": "p1", "title": "Updated",
-				"author": map[string]any{"id": "u1", "username": "t"},
+				"author":     map[string]any{"id": "u1", "username": "t"},
 				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -189,7 +189,7 @@ func TestCreateComment(t *testing.T) {
 			}
 			jsonResp(w, map[string]any{
 				"id": "c1", "post_id": "p1", "body": "Nice post",
-				"author": map[string]any{"id": "u1", "username": "t"},
+				"author":     map[string]any{"id": "u1", "username": "t"},
 				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -291,7 +291,7 @@ func TestSendMessage(t *testing.T) {
 		"POST /messages/send/bob": func(w http.ResponseWriter, r *http.Request) {
 			jsonResp(w, map[string]any{
 				"id": "m1", "body": "hey",
-				"sender":    map[string]any{"id": "u1", "username": "me"},
+				"sender":     map[string]any{"id": "u1", "username": "me"},
 				"created_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -503,7 +503,7 @@ func TestRetryOnServerError(t *testing.T) {
 			}
 			jsonResp(w, map[string]any{
 				"id": "p1", "title": "OK",
-				"author": map[string]any{"id": "u1", "username": "t"},
+				"author":     map[string]any{"id": "u1", "username": "t"},
 				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -594,7 +594,7 @@ func TestColonyResolution(t *testing.T) {
 			}
 			jsonResp(w, map[string]any{
 				"id": "p1", "title": "T", "colony_id": colonyID,
-				"author": map[string]any{"id": "u1", "username": "t"},
+				"author":     map[string]any{"id": "u1", "username": "t"},
 				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
 			})
 		},
@@ -652,5 +652,256 @@ func TestPtrHelper(t *testing.T) {
 	i := colony.Ptr(42)
 	if *i != 42 {
 		t.Errorf("expected 42, got %d", *i)
+	}
+}
+
+func TestUpdateComment(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"PUT /comments/c1": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["body"] != "edited" {
+				t.Errorf("expected body edited, got %v", body["body"])
+			}
+			jsonResp(w, map[string]any{
+				"id": "c1", "body": "edited",
+				"author":     map[string]any{"id": "u1", "username": "t"},
+				"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+			})
+		},
+	}))
+
+	comment, err := client.UpdateComment(context.Background(), "c1", "edited")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comment.Body != "edited" {
+		t.Errorf("expected body edited, got %s", comment.Body)
+	}
+}
+
+func TestDeleteComment(t *testing.T) {
+	called := int32(0)
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"DELETE /comments/c1": func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&called, 1)
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}))
+
+	if err := client.DeleteComment(context.Background(), "c1"); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&called) != 1 {
+		t.Errorf("expected 1 call, got %d", called)
+	}
+}
+
+func TestGetPostContext(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"GET /posts/p1/context": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{
+				"post":        map[string]any{"id": "p1", "title": "T"},
+				"colony":      map[string]any{"name": "findings"},
+				"comments":    []any{},
+				"related":     []any{},
+				"viewer":      map[string]any{"has_voted": false},
+				"commentable": true,
+			})
+		},
+	}))
+
+	ctx, err := client.GetPostContext(context.Background(), "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ctx["post"]; !ok {
+		t.Error("expected post key in response")
+	}
+	if ctx["commentable"] != true {
+		t.Errorf("expected commentable=true, got %v", ctx["commentable"])
+	}
+}
+
+func TestGetPostConversation(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"GET /posts/p1/conversation": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{
+				"post_id":        "p1",
+				"thread_count":   2,
+				"total_comments": 5,
+				"threads":        []any{},
+			})
+		},
+	}))
+
+	conv, err := client.GetPostConversation(context.Background(), "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv["post_id"] != "p1" {
+		t.Errorf("expected post_id p1, got %v", conv["post_id"])
+	}
+	if conv["total_comments"] != float64(5) {
+		t.Errorf("expected total_comments 5, got %v", conv["total_comments"])
+	}
+}
+
+func TestGetRisingPosts(t *testing.T) {
+	var gotQuery string
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"GET /trending/posts/rising": func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.RawQuery
+			jsonResp(w, map[string]any{
+				"items": []map[string]any{
+					{"id": "p1", "title": "Rising",
+						"author":     map[string]any{"id": "u1", "username": "t"},
+						"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+				},
+				"total": 1,
+			})
+		},
+	}))
+
+	result, err := client.GetRisingPosts(context.Background(), &colony.GetRisingPostsOptions{Limit: 10, Offset: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 {
+		t.Errorf("expected 1 item, got %d", len(result.Items))
+	}
+	if !strings.Contains(gotQuery, "limit=10") || !strings.Contains(gotQuery, "offset=5") {
+		t.Errorf("expected limit=10 and offset=5 in query, got %q", gotQuery)
+	}
+}
+
+func TestGetRisingPostsNoOptions(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"GET /trending/posts/rising": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.RawQuery != "" {
+				t.Errorf("expected empty query when no options, got %q", r.URL.RawQuery)
+			}
+			jsonResp(w, map[string]any{"items": []any{}, "total": 0})
+		},
+	}))
+
+	if _, err := client.GetRisingPosts(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetTrendingTags(t *testing.T) {
+	var gotQuery string
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"GET /trending/tags": func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.RawQuery
+			jsonResp(w, map[string]any{
+				"tags":   []any{map[string]any{"tag": "ai", "count": 42}},
+				"window": "day",
+			})
+		},
+	}))
+
+	tags, err := client.GetTrendingTags(context.Background(), &colony.GetTrendingTagsOptions{
+		Window: colony.TrendingWindowDay, Limit: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tags["window"] != "day" {
+		t.Errorf("expected window day, got %v", tags["window"])
+	}
+	if !strings.Contains(gotQuery, "window=day") || !strings.Contains(gotQuery, "limit=20") {
+		t.Errorf("expected window=day and limit=20 in query, got %q", gotQuery)
+	}
+}
+
+func TestGetUserReport(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"GET /agents/alice/report": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{
+				"username":         "alice",
+				"karma":            120,
+				"dispute_ratio":    0.02,
+				"facilitation":     map[string]any{"hosted_count": 3},
+				"reputation_flags": []any{"trusted"},
+			})
+		},
+	}))
+
+	report, err := client.GetUserReport(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report["username"] != "alice" {
+		t.Errorf("expected username alice, got %v", report["username"])
+	}
+	if report["karma"] != float64(120) {
+		t.Errorf("expected karma 120, got %v", report["karma"])
+	}
+}
+
+func TestMarkConversationRead(t *testing.T) {
+	called := int32(0)
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"POST /messages/conversations/bob/read": func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&called, 1)
+			jsonResp(w, map[string]any{"ok": true})
+		},
+	}))
+
+	if err := client.MarkConversationRead(context.Background(), "bob"); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&called) != 1 {
+		t.Errorf("expected 1 call, got %d", called)
+	}
+}
+
+func TestArchiveConversation(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"POST /messages/conversations/bob/archive": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{"ok": true})
+		},
+	}))
+
+	if err := client.ArchiveConversation(context.Background(), "bob"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnarchiveConversation(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"POST /messages/conversations/bob/unarchive": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{"ok": true})
+		},
+	}))
+
+	if err := client.UnarchiveConversation(context.Background(), "bob"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMuteConversation(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"POST /messages/conversations/bob/mute": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{"ok": true})
+		},
+	}))
+
+	if err := client.MuteConversation(context.Background(), "bob"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnmuteConversation(t *testing.T) {
+	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
+		"POST /messages/conversations/bob/unmute": func(w http.ResponseWriter, r *http.Request) {
+			jsonResp(w, map[string]any{"ok": true})
+		},
+	}))
+
+	if err := client.UnmuteConversation(context.Background(), "bob"); err != nil {
+		t.Fatal(err)
 	}
 }

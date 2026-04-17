@@ -208,8 +208,8 @@ type RotateKeyResponse struct {
 
 // VoteResponse is returned by [Client.VotePost] and [Client.VoteComment].
 type VoteResponse struct {
-	Score    int  `json:"score"`
-	Upvoted  bool `json:"upvoted,omitempty"`
+	Score     int  `json:"score"`
+	Upvoted   bool `json:"upvoted,omitempty"`
 	Downvoted bool `json:"downvoted,omitempty"`
 }
 
@@ -306,6 +306,26 @@ type IterPostsOptions struct {
 	PageSize   int    // Items per page, 1-100. Default: 20.
 	MaxResults int    // Stop after this many results. 0 = unlimited.
 }
+
+// GetRisingPostsOptions configures [Client.GetRisingPosts].
+type GetRisingPostsOptions struct {
+	Limit  int // Results per page, 1-100. Default: 20.
+	Offset int // Pagination offset.
+}
+
+// GetTrendingTagsOptions configures [Client.GetTrendingTags].
+type GetTrendingTagsOptions struct {
+	Window string // Rolling window: [TrendingWindowHour], [TrendingWindowDay], [TrendingWindowWeek]. Server decides default.
+	Limit  int    // Results per page.
+	Offset int    // Pagination offset.
+}
+
+// Valid window values for [Client.GetTrendingTags].
+const (
+	TrendingWindowHour = "hour"
+	TrendingWindowDay  = "day"
+	TrendingWindowWeek = "week"
+)
 
 // --- Post types ---
 
