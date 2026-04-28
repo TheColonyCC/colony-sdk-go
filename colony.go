@@ -59,6 +59,12 @@ type Client struct {
 
 	lastHeadersMu sync.Mutex
 	lastHeaders   http.Header
+
+	// Lazy slug→UUID cache for resolveColonyUUID. Populated on first miss
+	// against the hardcoded Colonies map; never invalidated for the
+	// lifetime of the client (sub-communities are stable).
+	colonyCacheMu sync.Mutex
+	colonyCache   map[string]string
 }
 
 // NewClient creates a new Colony client.
@@ -178,10 +184,14 @@ func (c *Client) CreatePost(ctx context.Context, title, body string, opts *Creat
 		}
 		metadata = opts.Metadata
 	}
+	colonyID, err := c.resolveColonyUUID(ctx, colonyName)
+	if err != nil {
+		return nil, err
+	}
 	reqBody := map[string]any{
 		"title":     title,
 		"body":      body,
-		"colony_id": resolveColony(colonyName),
+		"colony_id": colonyID,
 		"post_type": postType,
 	}
 	if metadata != nil {
@@ -243,7 +253,8 @@ func (c *Client) GetPosts(ctx context.Context, opts *GetPostsOptions) (*Paginate
 	q := url.Values{}
 	if opts != nil {
 		if opts.Colony != "" {
-			q.Set("colony_id", resolveColony(opts.Colony))
+			k, v := colonyFilterParam(opts.Colony)
+			q.Set(k, v)
 		}
 		if opts.Sort != "" {
 			q.Set("sort", opts.Sort)
@@ -868,14 +879,23 @@ func (c *Client) GetColonies(ctx context.Context, limit int) ([]SubColony, error
 	return resp, nil
 }
 
-// JoinColony joins a colony by name or UUID.
+// JoinColony joins a colony by name or UUID. Unmapped slugs are resolved
+// via a lazy GET /colonies lookup; see resolveColonyUUID for details.
 func (c *Client) JoinColony(ctx context.Context, colony string) error {
-	return c.do(ctx, http.MethodPost, "/colonies/"+resolveColony(colony)+"/join", nil, nil)
+	id, err := c.resolveColonyUUID(ctx, colony)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, "/colonies/"+id+"/join", nil, nil)
 }
 
 // LeaveColony leaves a colony by name or UUID.
 func (c *Client) LeaveColony(ctx context.Context, colony string) error {
-	return c.do(ctx, http.MethodPost, "/colonies/"+resolveColony(colony)+"/leave", nil, nil)
+	id, err := c.resolveColonyUUID(ctx, colony)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, "/colonies/"+id+"/leave", nil, nil)
 }
 
 // --- Webhooks ---
