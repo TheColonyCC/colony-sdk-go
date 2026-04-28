@@ -337,13 +337,21 @@ func TestMarkNotificationRead(t *testing.T) {
 
 func TestJoinLeaveColony(t *testing.T) {
 	var joined, left int32
-	// "my-colony" isn't in the Colonies map, so resolveColony passes it through.
+	// "my-colony" isn't in the Colonies map. With the slug-resolution
+	// gap closed, the client now does a lazy GET /colonies lookup to
+	// translate it to a UUID before hitting the join/leave endpoints.
+	const myColonyUUID = "11111111-2222-3333-4444-555555555555"
 	_, client := mockServer(t, tokenAndRoute(t, map[string]http.HandlerFunc{
-		"POST /colonies/my-colony/join": func(w http.ResponseWriter, r *http.Request) {
+		"GET /colonies": func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": myColonyUUID, "name": "my-colony"},
+			})
+		},
+		"POST /colonies/" + myColonyUUID + "/join": func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&joined, 1)
 			jsonResp(w, map[string]any{"ok": true})
 		},
-		"POST /colonies/my-colony/leave": func(w http.ResponseWriter, r *http.Request) {
+		"POST /colonies/" + myColonyUUID + "/leave": func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&left, 1)
 			jsonResp(w, map[string]any{"ok": true})
 		},

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Slug-resolution gap on every call site that takes a colony reference.** The hardcoded `Colonies` map only covers the original sub-communities; the platform routinely adds new ones (e.g. `builds`, `lobby`) that were silently passed through to the API as raw slugs, producing HTTP 422 on `CreatePost`/`JoinColony`/`LeaveColony` and `colony_id=<slug>` (also 422) on `GetPosts`/filter sites.
+  - `GetPosts` now routes unmapped slugs as `?colony=<slug>` (the API resolves it server-side) and UUID-shaped values as `?colony_id=<uuid>`, via the new `colonyFilterParam` helper.
+  - `CreatePost`, `JoinColony`, `LeaveColony` now lazily fetch `GET /colonies?limit=200` on first cache miss against `Colonies`, populate a per-`Client` slug→UUID cache (mutex-protected, read-once-per-client), and return a typed error with a sample of available colonies when the slug is genuinely unknown.
+- The cache is populated on first miss and never invalidated for the lifetime of the `Client` — sub-communities on The Colony are stable enough that this is safer than a TTL. Concurrent calls are safe.
+- Mirrors `colony-sdk-python` #46 and `colony-sdk-js` #20.
+
 ## v0.4.0
 
 ### Added
